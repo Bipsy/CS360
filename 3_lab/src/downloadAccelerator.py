@@ -26,16 +26,22 @@ class Downloader:
 			print response.headers.get('content-length')
 			size = int(response.headers.get('content-length'))
 			threads = []
+			chunk = size / self.thread_number
 			for thread in range(0, self.thread_number):
-				start = (size / self.thread_number) * thread
-				end = (size / self.thread_number) * (thread+1)
+				start = chunk * thread
+				if thread == self.thread_number-1:
+					end = size-1
+				else:
+					end = (chunk * (thread+1)) - 1
 				print "(start: %s and end: %s)" % (start, end)
 				t = DownloadThread(url, start, end)
 				threads.append(t)
 			for thread in threads:
 				thread.start()
-			for thread in threads:
-				thread.join()
+			with open('file.txt', 'a') as f:				
+				for thread in threads:
+					thread.join()
+					f.write(thread.text);								
 		else:
 			print 'Error: ' + str(response.status_code)
 			
@@ -46,13 +52,10 @@ class DownloadThread(threading.Thread):
 		self.beginning = beginning
 		self.end = end
 	def run(self):
-		print 'Downloading %s' % self.url
-		custom_header = {'Range: ': "%s-%s" % (self.beginning, self.end)}
+		custom_header = {'Range':"bytes=%s-%s" % (self.beginning, self.end)}
+		print custom_header
 		response = requests.get(self.url, stream=True, headers=custom_header)
-		print response.headers
-		#print "Content-Range: %s" % (response.headers.get('content-range'))
-		with open('file.txt', 'a') as f:
-			f.write(response.content)
+		self.text = response.text
 			
 if __name__ == '__main__':
 	d = Downloader()	
