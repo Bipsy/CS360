@@ -2,6 +2,7 @@ import argparse
 import os
 import requests
 import threading
+import codecs
 
 class Downloader:
 
@@ -38,7 +39,9 @@ class Downloader:
 				threads.append(t)
 			for thread in threads:
 				thread.start()
-			with open('file.txt', 'a') as f:				
+			split_url = url.split('/')
+			file_name = split_url[-1]
+			with codecs.open(file_name, mode='w', encoding='utf-8') as f:				
 				for thread in threads:
 					thread.join()
 					f.write(thread.text);								
