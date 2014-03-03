@@ -41,10 +41,11 @@ class Downloader:
 				thread.start()
 			split_url = url.split('/')
 			file_name = split_url[-1]
-			with codecs.open(file_name, mode='w', encoding='utf-8') as f:				
+			with codecs.open(file_name, mode='w', encoding='utf-8') as f:
 				for thread in threads:
 					thread.join()
-					f.write(thread.text);								
+					f.write(thread.response.content);
+					print 'Download Complete...'								
 		else:
 			print 'Error: ' + str(response.status_code)
 			
@@ -58,7 +59,7 @@ class DownloadThread(threading.Thread):
 		custom_header = {'Range':"bytes=%s-%s" % (self.beginning, self.end)}
 		print custom_header
 		response = requests.get(self.url, stream=True, headers=custom_header)
-		self.text = response.text
+		self.response = response
 			
 if __name__ == '__main__':
 	d = Downloader()	
