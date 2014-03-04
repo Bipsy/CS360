@@ -33,7 +33,7 @@ class Downloader:
 					end = size-1
 				else:
 					end = (chunk * (thread+1)) - 1
-				print "(start: %s and end: %s)" % (start, end)
+				#print "(start: %s and end: %s)" % (start, end)
 				t = DownloadThread(url, start, end)
 				threads.append(t)
 			for thread in threads:
@@ -42,7 +42,7 @@ class Downloader:
 				for thread in threads:
 					thread.join()
 					f.write(thread.response.content);
-					print 'Download Complete...'								
+					print url + " " + str(self.thread_number) + " " + 'seconds'								
 		else:
 			print 'Error: ' + str(response.status_code)
 			
@@ -54,7 +54,7 @@ class DownloadThread(threading.Thread):
 		self.end = end
 	def run(self):
 		custom_header = {'Range':"bytes=%s-%s" % (self.beginning, self.end)}
-		print custom_header
+		#print custom_header
 		response = requests.get(self.url, stream=True, headers=custom_header)
 		self.response = response
 			
