@@ -2,7 +2,7 @@ import argparse
 import os
 import requests
 import threading
-import codecs
+import time
 
 class Downloader:
 
@@ -21,10 +21,10 @@ class Downloader:
 		self.download(args.url)
 		
 	def download(self, url):
-		print 'Sending head request %s' % url
+		#print 'Sending head request %s' % url
 		response = requests.head(url)
 		if response.status_code == requests.codes.ok:
-			print response.headers.get('content-length')
+			#print response.headers.get('content-length')
 			size = int(response.headers.get('content-length'))
 			threads = []
 			chunk = size / self.thread_number
@@ -34,18 +34,22 @@ class Downloader:
 					end = size-1
 				else:
 					end = (chunk * (thread+1)) - 1
-				print "(start: %s and end: %s)" % (start, end)
+				#print "(start: %s and end: %s)" % (start, end)
 				t = DownloadThread(url, start, end)
 				threads.append(t)
+			start = time.time()
 			for thread in threads:
 				thread.start()
 			split_url = url.split('/')
 			file_name = split_url[-1]
-			with codecs.open(file_name, mode='w', encoding='utf-8') as f:
+			if file_name == "":
+				file_name = "index.html"
+			with open(file_name, 'wb') as f:
 				for thread in threads:
 					thread.join()
-					f.write(thread.response.content);
-					print 'Download Complete...'								
+					f.write(thread.content)
+			end = time.time()
+			print url + " " + str(self.thread_number) + " "	+ str(size) + " " + str(end - start)							
 		else:
 			print 'Error: ' + str(response.status_code)
 			
@@ -57,9 +61,9 @@ class DownloadThread(threading.Thread):
 		self.end = end
 	def run(self):
 		custom_header = {'Range':"bytes=%s-%s" % (self.beginning, self.end)}
-		print custom_header
+		#print custom_header
 		response = requests.get(self.url, stream=True, headers=custom_header)
-		self.response = response
+		self.content = response.content
 			
 if __name__ == '__main__':
 	d = Downloader()	
