@@ -1,6 +1,9 @@
 import select
 import socket
 import sys
+import errno
+import os.path
+import time
 
 class Poller:
 	""" Polling server """
@@ -11,6 +14,41 @@ class Poller:
 		self.clients = {}
 		self.cache = {}
 		self.size = 1024
+		self.hosts = {}
+		self.media = {}
+		self.timeout = 1
+		self.status_messages = {200: 'OK', 400: 'Bad Request', 403: 'Forbidden', 404: 'Not Found', 500: 'Internal Server Error', 501: 'Not Implemented'}
+		
+	def config(self):
+		with open('web.conf') as f:
+			lines = f.readlines()
+			for line in lines:
+				#print line.strip()
+				words = line.split()
+				for word in words:
+					word.strip()
+				if len(words) < 3:
+					#print "Configuration line was too short"
+					continue
+				#print words[0]	
+				if words[0] != 'host' and words[0] != 'media' and words[0] != 'parameter':
+					continue
+				if words[0] == 'host':
+					print "Found a host"
+					word = words[2]
+					if word[0] != '/':
+						self.hosts[words[1]] = os.getcwd() + '/' + word
+					else:
+						self.hosts[words[1]] = words[2]
+				elif words[0] == 'media':
+					self.media[words[1]] = words[2]
+				elif words[0] == 'parameter':
+					self.timeout = int(words[2])
+				else:
+					print words[0]
+					print "Configuration line didn't match any know type"
+		#for host in self.hosts:
+		#	print host
 		
 	def open_socket(self):
 		""" Setup the socket for incoming clients """
@@ -19,6 +57,7 @@ class Poller:
 			self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 			self.server.bind((self.host, self.port))
 			self.server.listen(5)
+			self.server.setblocking(0)
 		except socket.error, (value, message):
 			if self.server:
 				self.server.close()
@@ -30,9 +69,15 @@ class Poller:
 		self.poller = select.epoll()
 		self.pollmask = select.EPOLLIN | select.EPOLLHUP | select.EPOLLERR
 		self.poller.register(self.server, self.pollmask)
+		
+		""" Congigure the server """
+		self.config()
+		
 		while True:
 			try:
+				print "Getting file active sockets..."
 				fds = self.poller.poll(timeout=1)
+				print "Finished getting sockets..."
 			except:
 				return
 			for (fd, event) in fds:
@@ -53,6 +98,7 @@ class Poller:
 		else:
 			self.clients[fd].close()
 			del self.clients[fd]
+			del self.cache[fd]
 			
 	def handleServer(self):
 		while True:
@@ -69,7 +115,7 @@ class Poller:
 			self.poller.register(client.fileno(), self.pollmask)
 		
 	def handleClient(self, fd):
-		print "handling client"
+		print "Handling client"
 		while True:
 			try:
 				data = self.clients[fd].recv(self.size)
@@ -77,36 +123,91 @@ class Poller:
 				end_index = self.cache[fd].find("\r\n\r\n")
 				if end_index != -1:
 					cached_message = self.cache[fd]
-					handleHttpRequest(fd, cached_message[:end_index+4])
-					self.cache[fd] = cached_message[end_index+4:]
+					self.handleHttpRequest(fd, cached_message[:end_index+4])
+					#self.cache[fd] = cached_message[end_index+4:]
 					break;
 				if not data:
-					cleanup(fd)
+					self.cleanup(fd)
+					break
 			except socket.error, (value, message):
 				if data == 'EAGAIN' or data == 'EWOULDBLOCK':
+					self.cleanup(fd)
 					break
 				print traceback.format_exc()
 				sys.exit()
+		print "Finished Handling Client..."
 			
 	def handleHttpRequest(self, fd, message):
+		#print message
+		""" We will handle the http request with the following steps:
+			1. Parse and check first line for proper method
+				a. Method must be GET
+				b. URL must exist
+				c. Version must be HTTP/1.1
+			2. Parse headers and discard incorrect headers
+				a. Determine host header
+			3. Retrieve requested object
+			4. Build response and send response
+		"""
+			
+		#1	-- Need to check if request line is valid
 		lines = message.splitlines()
 		first_line = lines[0].split()
-		if first_line[0] != "GET":
-			cleanup(fd)
-		url = first_line[1]
+		#print first_line[1]
+		if len(first_line) != 3:
+			self.handleHttpResponse(fd, 400, "")
+			self.cleanup(fd)
+			return
+		elif first_line[0] != 'GET':
+			self.handleHttpREsponse(fd, 501, "")
+			self.cleanup(fd)
+			return
+		
+		#2  -- Need to parse headers and determine host header	
 		header_lines = lines[1:]
 		headers = {}
+		host_path = self.hosts['default']
 		for line in header_lines:
 			header = line.split(':')
-			if header.size() < 2:
+			if len(header) < 2:
 				continue
-			headers[header[0]] = header[1]
-		url_parsed = url.split('/')
-		file_name = url_parsed[-1]
-		if file_name == "":
-			file_name = "index.html"
-		with open(file_name, 'rb') as f:
-			self.clients[fd].send(f.read())
+			if header[0] == 'Host':
+				for host in self.hosts:
+					if header[1].strip() == host:
+						host_path = self.hosts[header[1].strip()]
+			else:
+				headers[header[0]] = header[1]
+		#print headers
+		
+		#3 & #1.b
+		url = first_line[1]
+		if url == '/':
+			url = '/index.html'
+		abs_path = host_path + url
+		if os.path.isfile(abs_path) == False:
+			print abs_path
+			self.handleHttpResponse(fd, 404, "")
+			self.cleanup(fd)
+			return
+		with open(abs_path, 'rb') as f:
+			file_name, file_extension = os.path.splitext(abs_path)
+			self.handleHttpResponse(fd, 200, f.read(), file_name, file_extension)
+			return
+			
+	def handleHttpResponse(self, fd, status_code, content, file_name, file_extension):
+		response = "HTTP/1.1 " + str(status_code) + " " + self.status_messages[status_code] + "\r\n"
+		response += "Content-Type: " + self.media[file_extension.strip()[1:]] + "\r\n"
+		response += "Content-Length: " + str(len(content)) + "\r\n"
+		gmt = time.gmtime(os.path.getmtime(file_name+file_extension))
+		format = '%a, %d %b %Y %H:%M:%S GMT'
+		time_string = time.strftime(format, gmt)
+		response += "Last-Modified: " + time_string + "\r\n"
+		response += content
+		print response
+		print "Sending Response..."
+		self.clients[fd].send(response)
+		print "Finished Sending Response..."
+		return
 		
 			
 		
@@ -114,6 +215,7 @@ class Poller:
 		self.poller.unregister(fd)
 		self.clients[fd].close()
 		del self.clients[fd]
+		del self.cache[fd]
 		return
 
 		
