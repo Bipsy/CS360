@@ -4,6 +4,7 @@ import sys
 import errno
 import os.path
 import time
+import traceback
 
 class Poller:
 	""" Polling server """
@@ -12,6 +13,7 @@ class Poller:
 		self.port = port
 		self.open_socket()
 		self.clients = {}
+		self.client_times = {}
 		self.cache = {}
 		self.size = 1024
 		self.hosts = {}
@@ -74,12 +76,25 @@ class Poller:
 		self.config()
 		
 		while True:
+			current_time = lambda: int(round(time.time()))
 			try:
 				print "Getting file active sockets..."
+				first_time = current_time()
 				fds = self.poller.poll(timeout=1)
+				for (fd, event) in fds:
+					if fd != self.server.fileno():
+						self.client_times[fd] = first_time
+				second_time = current_time()
+				idle_sockets = []
+				for fd in self.client_times:
+					if second_time - self.client_times[fd] > self.timeout:
+						idle_sockets.append(fd)
+				for fd in idle_sockets:
+					self.cleanup(fd)
 				print "Finished getting sockets..."
 			except:
-				return
+				print traceback.format_exc()
+				sys.exit()
 			for (fd, event) in fds:
 				if event & (select.POLLHUP | select.POLLERR):
 					self.handleError(fd)
@@ -91,14 +106,12 @@ class Poller:
 				
 	def handleError(self, fd):
 		self.poller.unregister(fd)
-		if fd == self.server(fileno()):
+		if fd == self.server.fileno():
 			self.server.close()
 			self.open_socket()
 			self.poller.register(self.server, self.pollmask)
 		else:
-			self.clients[fd].close()
-			del self.clients[fd]
-			del self.cache[fd]
+			self.cleanup(fd)
 			
 	def handleServer(self):
 		while True:
@@ -113,6 +126,7 @@ class Poller:
 			self.clients[client.fileno()] = client
 			self.cache[client.fileno()] = ""
 			self.poller.register(client.fileno(), self.pollmask)
+			self.client_times[client.fileno()] = int(round(time.time()))
 		
 	def handleClient(self, fd):
 		print "Handling client"
@@ -127,7 +141,6 @@ class Poller:
 					#self.cache[fd] = cached_message[end_index+4:]
 					break;
 				if not data:
-					self.cleanup(fd)
 					break
 			except socket.error, (value, message):
 				if data == 'EAGAIN' or data == 'EWOULDBLOCK':
@@ -186,8 +199,7 @@ class Poller:
 		abs_path = host_path + url
 		if os.path.isfile(abs_path) == False:
 			print abs_path
-			self.handleHttpResponse(fd, 404, "")
-			self.cleanup(fd)
+			self.handleHttpResponse(fd, 404, "", "", "")
 			return
 		with open(abs_path, 'rb') as f:
 			file_name, file_extension = os.path.splitext(abs_path)
@@ -196,26 +208,29 @@ class Poller:
 			
 	def handleHttpResponse(self, fd, status_code, content, file_name, file_extension):
 		response = "HTTP/1.1 " + str(status_code) + " " + self.status_messages[status_code] + "\r\n"
-		response += "Content-Type: " + self.media[file_extension.strip()[1:]] + "\r\n"
+		if status_code == 200:
+			response += "Content-Type: " + self.media[file_extension.strip()[1:]] + "\r\n"
+			gmt = time.gmtime(os.path.getmtime(file_name+file_extension))
+			format = '%a, %d %b %Y %H:%M:%S GMT'
+			time_string = time.strftime(format, gmt)
+			response += "Last-Modified: " + time_string + "\r\n"
+		response += "Server: Apache/2.4.1 (Unix)\r\n"
 		response += "Content-Length: " + str(len(content)) + "\r\n"
-		gmt = time.gmtime(os.path.getmtime(file_name+file_extension))
-		format = '%a, %d %b %Y %H:%M:%S GMT'
-		time_string = time.strftime(format, gmt)
-		response += "Last-Modified: " + time_string + "\r\n"
+		from  email.utils import formatdate
+		response += "Date: " + formatdate(timeval=None, localtime=False, usegmt=True) + "\r\n\r\n"
 		response += content
 		print response
 		print "Sending Response..."
 		self.clients[fd].send(response)
 		print "Finished Sending Response..."
 		return
-		
 			
-		
 	def cleanup(self, fd):
 		self.poller.unregister(fd)
 		self.clients[fd].close()
 		del self.clients[fd]
 		del self.cache[fd]
+		del self.client_times[fd]
 		return
 
 		
