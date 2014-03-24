@@ -200,10 +200,16 @@ class Poller:
 			#print abs_path
 			self.handleHttpResponse(fd, 404, "", "", "")
 			return
-		with open(abs_path, 'rb') as f:
+		try:
+			with open(abs_path, 'rb') as f:
+				file_name, file_extension = os.path.splitext(abs_path)
+				self.handleHttpResponse(fd, 200, f.read(), file_name, file_extension)
+				return
+		except IOError:
 			file_name, file_extension = os.path.splitext(abs_path)
-			self.handleHttpResponse(fd, 200, f.read(), file_name, file_extension)
-			return
+			self.handleHttpResponse(fd, 403, "", file_name, file_extension)
+			return 
+			
 			
 	def handleHttpResponse(self, fd, status_code, content, file_name, file_extension):
 		response = "HTTP/1.1 " + str(status_code) + " " + self.status_messages[status_code] + "\r\n"
@@ -217,8 +223,9 @@ class Poller:
 		response += "Content-Length: " + str(len(content)) + "\r\n"
 		from  email.utils import formatdate
 		response += "Date: " + formatdate(timeval=None, localtime=False, usegmt=True) + "\r\n\r\n"
-		response += content
 		print response
+		response += content
+		#print response
 		#print "Sending Response..."
 		self.clients[fd].send(response)
 		#print "Finished Sending Response..."
