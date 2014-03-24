@@ -78,7 +78,7 @@ class Poller:
 		while True:
 			current_time = lambda: int(round(time.time()))
 			try:
-				print "Getting file active sockets..."
+				#print "Getting file active sockets..."
 				first_time = current_time()
 				fds = self.poller.poll(timeout=1)
 				for (fd, event) in fds:
@@ -91,7 +91,7 @@ class Poller:
 						idle_sockets.append(fd)
 				for fd in idle_sockets:
 					self.cleanup(fd)
-				print "Finished getting sockets..."
+				#print "Finished getting sockets..."
 			except:
 				print traceback.format_exc()
 				sys.exit()
@@ -105,8 +105,8 @@ class Poller:
 				result = self.handleClient(fd)
 				
 	def handleError(self, fd):
-		self.poller.unregister(fd)
 		if fd == self.server.fileno():
+			self.poller.unregister(fd)
 			self.server.close()
 			self.open_socket()
 			self.poller.register(self.server, self.pollmask)
@@ -129,7 +129,7 @@ class Poller:
 			self.client_times[client.fileno()] = int(round(time.time()))
 		
 	def handleClient(self, fd):
-		print "Handling client"
+		#print "Handling client"
 		while True:
 			try:
 				data = self.clients[fd].recv(self.size)
@@ -138,7 +138,6 @@ class Poller:
 				if end_index != -1:
 					cached_message = self.cache[fd]
 					self.handleHttpRequest(fd, cached_message[:end_index+4])
-					#self.cache[fd] = cached_message[end_index+4:]
 					break;
 				if not data:
 					break
@@ -148,7 +147,7 @@ class Poller:
 					break
 				print traceback.format_exc()
 				sys.exit()
-		print "Finished Handling Client..."
+		#print "Finished Handling Client..."
 			
 	def handleHttpRequest(self, fd, message):
 		#print message
@@ -172,7 +171,7 @@ class Poller:
 			self.cleanup(fd)
 			return
 		elif first_line[0] != 'GET':
-			self.handleHttpREsponse(fd, 501, "")
+			self.handleHttpResponse(fd, 501, "", "", "")
 			self.cleanup(fd)
 			return
 		
@@ -198,7 +197,7 @@ class Poller:
 			url = '/index.html'
 		abs_path = host_path + url
 		if os.path.isfile(abs_path) == False:
-			print abs_path
+			#print abs_path
 			self.handleHttpResponse(fd, 404, "", "", "")
 			return
 		with open(abs_path, 'rb') as f:
@@ -220,9 +219,9 @@ class Poller:
 		response += "Date: " + formatdate(timeval=None, localtime=False, usegmt=True) + "\r\n\r\n"
 		response += content
 		print response
-		print "Sending Response..."
+		#print "Sending Response..."
 		self.clients[fd].send(response)
-		print "Finished Sending Response..."
+		#print "Finished Sending Response..."
 		return
 			
 	def cleanup(self, fd):
