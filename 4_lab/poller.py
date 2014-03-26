@@ -138,6 +138,7 @@ class Poller:
 				if end_index != -1:
 					cached_message = self.cache[fd]
 					self.handleHttpRequest(fd, cached_message[:end_index+4])
+					self.cache[fd] = ""
 					break;
 				if not data:
 					break
@@ -150,7 +151,7 @@ class Poller:
 		#print "Finished Handling Client..."
 			
 	def handleHttpRequest(self, fd, message):
-		#print message
+		print message
 		""" We will handle the http request with the following steps:
 			1. Parse and check first line for proper method
 				a. Method must be GET
@@ -219,15 +220,31 @@ class Poller:
 			format = '%a, %d %b %Y %H:%M:%S GMT'
 			time_string = time.strftime(format, gmt)
 			response += "Last-Modified: " + time_string + "\r\n"
-		response += "Server: Apache/2.4.1 (Unix)\r\n"
+		else:
+			response += "Content-Type: text/html\r\n"
+			content = "<!DOCTYPE html><html><head></head><body></body></html>"
+		response += "Server: Python Server\r\n"
 		response += "Content-Length: " + str(len(content)) + "\r\n"
 		from  email.utils import formatdate
 		response += "Date: " + formatdate(timeval=None, localtime=False, usegmt=True) + "\r\n\r\n"
 		print response
 		response += content
 		#print response
-		#print "Sending Response..."
-		self.clients[fd].send(response)
+		#print "Sending Response...
+		sent = self.clients[fd].send(response)
+		while True:
+			try:
+				if sent < len(content):
+					sent += self.clients[fd].send(response[sent:])
+				else:
+					break;
+			except socket.error, (errno, string):
+				if errno == 11:
+					continue
+				else:
+					print traceback.format_exc()
+					sys.exit()
+						
 		#print "Finished Sending Response..."
 		return
 			
